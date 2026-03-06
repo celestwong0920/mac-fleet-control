@@ -45,21 +45,55 @@ sleep 0.3
 echo -e "    ${C}───────────────── Network Topology ─────────────────${NC}"
 echo ""
 
-# Detect real machines from fleet registry
-FLEET_FILE="${FLEET_FILE:-$HOME/.fleet-machines.json}"
+# ── Mode: --showcase uses demo data, default uses real fleet ──
+SHOWCASE=false
+[[ "$1" == "--showcase" ]] && SHOWCASE=true
 
-if [ -f "$FLEET_FILE" ] && command -v python3 &>/dev/null; then
-  # Parse real machines
-  MACHINES=$(python3 -c "
+if [ "$SHOWCASE" = true ]; then
+  MASTER_NAME="MacBook-Pro"
+  MASTER_IP="100.64.0.1"
+  WORKER_LINES=(
+    "Office-iMac-1|100.64.0.10|${G}● ONLINE${NC}"
+    "Office-iMac-2|100.64.0.11|${G}● ONLINE${NC}"
+    "Office-iMac-3|100.64.0.12|${G}● ONLINE${NC}"
+    "Home-Mac-mini|100.64.0.20|${G}● ONLINE${NC}"
+    "Studio-MacPro|100.64.0.30|${G}● ONLINE${NC}"
+    "Lab-Mac-mini-1|100.64.0.40|${G}● ONLINE${NC}"
+    "Lab-Mac-mini-2|100.64.0.41|${G}● ONLINE${NC}"
+    "Remote-iMac|100.64.0.50|${Y}● SLEEP${NC}"
+  )
+else
+  # Detect real machines from fleet registry
+  FLEET_FILE="${FLEET_FILE:-$HOME/.fleet-machines.json}"
+  MASTER_NAME=$(hostname | sed 's/\.local$//')
+  MASTER_IP=$(/Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 2>/dev/null || tailscale ip -4 2>/dev/null || echo "100.x.x.x")
+  WORKER_LINES=()
+
+  if [ -f "$FLEET_FILE" ] && command -v python3 &>/dev/null; then
+    MACHINES=$(python3 -c "
 import json
 with open('$FLEET_FILE') as f: d = json.load(f)
 for m in d['machines']:
     print(m['name'] + '|' + m['user'] + '|' + m['ip'])
 " 2>/dev/null)
-  
-  MASTER_NAME=$(hostname | sed 's/\.local$//')
-  MASTER_IP=$(/Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 2>/dev/null || tailscale ip -4 2>/dev/null || echo "100.x.x.x")
-  
+
+    while IFS='|' read -r name user ip; do
+      [ -z "$name" ] && continue
+      if ssh -o ConnectTimeout=3 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=ERROR "$user@$ip" "echo ok" </dev/null &>/dev/null 2>&1; then
+        WORKER_LINES+=("$name|$ip|${G}● ONLINE${NC}")
+      else
+        WORKER_LINES+=("$name|$ip|${R}● OFFLINE${NC}")
+      fi
+    done <<< "$MACHINES"
+  fi
+
+  if [ ${#WORKER_LINES[@]} -eq 0 ]; then
+    WORKER_LINES=(
+      "Worker-1|100.x.x.x|${DIM}● no machines${NC}"
+    )
+  fi
+fi
+
   # Master box
   echo -e "                      ${G}┌─────────────────────┐${NC}"
   echo -e "                      ${G}│${NC}  ${W}${BOLD}🖥  MASTER${NC}           ${G}│${NC}"
@@ -72,87 +106,95 @@ for m in d['machines']:
   echo -e "                      ${C}║${NC} ${DIM}WireGuard Encrypted${NC}  ${C}║${NC}"
   echo -e "                      ${C}╚══════════╤══════════╝${NC}"
   echo -e "                                 ${G}│${NC}"
-  
-  # Count machines for layout
-  MACHINE_COUNT=$(echo "$MACHINES" | wc -l | tr -d ' ')
-  
-  # Draw branch
-  if [ "$MACHINE_COUNT" -ge 2 ]; then
-    echo -e "                    ${G}┌────────────┴────────────┐${NC}"
-    echo -e "                    ${G}│${NC}                          ${G}│${NC}"
-  else
-    echo -e "                    ${G}│${NC}"
-  fi
-  
-  # Check each machine status and draw
-  i=0
-  WORKER_LINES=()
-  while IFS='|' read -r name user ip; do
-    [ -z "$name" ] && continue
-    # Quick connectivity check
-    if ssh -o ConnectTimeout=3 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=ERROR "$user@$ip" "echo ok" </dev/null &>/dev/null 2>&1; then
-      STATUS="${G}● ONLINE${NC}"
+
+  # Draw workers in rows of 3
+  TOTAL=${#WORKER_LINES[@]}
+  ROW=0
+
+  while [ $ROW -lt $TOTAL ]; do
+    # How many in this row (max 3)
+    LEFT=$((TOTAL - ROW))
+    [ $LEFT -gt 3 ] && COUNT=3 || COUNT=$LEFT
+
+    # Branch lines
+    if [ $ROW -eq 0 ]; then
+      if [ $COUNT -eq 1 ]; then
+        echo -e "                                 ${G}│${NC}"
+      elif [ $COUNT -eq 2 ]; then
+        echo -e "                    ${G}┌────────────┴────────────┐${NC}"
+        echo -e "                    ${G}│${NC}                          ${G}│${NC}"
+      else
+        echo -e "          ${G}┌──────────────────────┴──────────────────────┐${NC}"
+        echo -e "          ${G}│${NC}                       ${G}│${NC}                       ${G}│${NC}"
+      fi
     else
-      STATUS="${R}● OFFLINE${NC}"
+      if [ $COUNT -eq 1 ]; then
+        echo -e "                                 ${G}│${NC}"
+      elif [ $COUNT -eq 2 ]; then
+        echo -e "                    ${G}│${NC}                          ${G}│${NC}"
+      else
+        echo -e "          ${G}│${NC}                       ${G}│${NC}                       ${G}│${NC}"
+      fi
     fi
-    
-    WORKER_LINES+=("$name|$ip|$STATUS")
-    i=$((i + 1))
-  done <<< "$MACHINES"
-  
-  # Draw worker boxes side by side
-  if [ ${#WORKER_LINES[@]} -ge 2 ]; then
-    # Two workers side by side
-    IFS='|' read -r n1 ip1 s1 <<< "${WORKER_LINES[0]}"
-    IFS='|' read -r n2 ip2 s2 <<< "${WORKER_LINES[1]}"
-    
-    printf "         ${G}┌──────────────────────┐${NC}    ${G}┌──────────────────────┐${NC}\n"
-    printf "         ${G}│${NC}  ${W}${BOLD}🖥  WORKER 1${NC}          ${G}│${NC}    ${G}│${NC}  ${W}${BOLD}🖥  WORKER 2${NC}          ${G}│${NC}\n"
-    printf "         ${G}│${NC}  %-20s ${G}│${NC}    ${G}│${NC}  %-20s ${G}│${NC}\n" "$n1" "$n2"
-    printf "         ${G}│${NC}  ${DIM}%-20s${NC} ${G}│${NC}    ${G}│${NC}  ${DIM}%-20s${NC} ${G}│${NC}\n" "$ip1" "$ip2"
-    echo -e "         ${G}│${NC}  $s1              ${G}│${NC}    ${G}│${NC}  $s2              ${G}│${NC}"
-    printf "         ${G}└──────────────────────┘${NC}    ${G}└──────────────────────┘${NC}\n"
-    
-    # Extra workers
-    for ((j=2; j<${#WORKER_LINES[@]}; j++)); do
-      IFS='|' read -r nx ipx sx <<< "${WORKER_LINES[$j]}"
-      echo ""
-      printf "         ${G}┌──────────────────────┐${NC}\n"
-      printf "         ${G}│${NC}  ${W}${BOLD}🖥  WORKER $((j+1))${NC}          ${G}│${NC}\n"
-      printf "         ${G}│${NC}  %-20s ${G}│${NC}\n" "$nx"
-      printf "         ${G}│${NC}  ${DIM}%-20s${NC} ${G}│${NC}\n" "$ipx"
-      echo -e "         ${G}│${NC}  $sx              ${G}│${NC}"
-      printf "         ${G}└──────────────────────┘${NC}\n"
+
+    # Parse this row's data
+    NAMES=(); IPS=(); STATS=()
+    for ((c=0; c<COUNT; c++)); do
+      IDX=$((ROW + c))
+      IFS='|' read -r _n _ip _s <<< "${WORKER_LINES[$IDX]}"
+      NAMES+=("$_n"); IPS+=("$_ip"); STATS+=("$_s")
     done
-  elif [ ${#WORKER_LINES[@]} -eq 1 ]; then
-    IFS='|' read -r n1 ip1 s1 <<< "${WORKER_LINES[0]}"
-    printf "              ${G}┌──────────────────────┐${NC}\n"
-    printf "              ${G}│${NC}  ${W}${BOLD}🖥  WORKER 1${NC}          ${G}│${NC}\n"
-    printf "              ${G}│${NC}  %-20s ${G}│${NC}\n" "$n1"
-    printf "              ${G}│${NC}  ${DIM}%-20s${NC} ${G}│${NC}\n" "$ip1"
-    echo -e "              ${G}│${NC}  $s1              ${G}│${NC}"
-    printf "              ${G}└──────────────────────┘${NC}\n"
-  fi
-  
-else
-  # No fleet file — show demo topology
-  echo -e "                      ${G}┌─────────────────────┐${NC}"
-  echo -e "                      ${G}│${NC}  ${W}${BOLD}🖥  MASTER${NC}           ${G}│${NC}"
-  echo -e "                      ${G}│${NC}  Your Mac            ${G}│${NC}"
-  echo -e "                      ${G}└──────────┬──────────┘${NC}"
-  echo -e "                                 ${G}│${NC}"
-  echo -e "                      ${C}╔══════════╧══════════╗${NC}"
-  echo -e "                      ${C}║${NC} ${Y}🔒 Tailscale E2EE${NC}    ${C}║${NC}"
-  echo -e "                      ${C}╚══════════╤══════════╝${NC}"
-  echo -e "                                 ${G}│${NC}"
-  echo -e "                    ${G}┌────────────┴────────────┐${NC}"
-  echo -e "                    ${G}│${NC}                          ${G}│${NC}"
-  echo -e "         ${G}┌──────────────────────┐${NC}    ${G}┌──────────────────────┐${NC}"
-  echo -e "         ${G}│${NC}  ${W}${BOLD}🖥  WORKER 1${NC}          ${G}│${NC}    ${G}│${NC}  ${W}${BOLD}🖥  WORKER 2${NC}          ${G}│${NC}"
-  echo -e "         ${G}│${NC}  Office iMac          ${G}│${NC}    ${G}│${NC}  Home Mac mini        ${G}│${NC}"
-  echo -e "         ${G}│${NC}  ${G}● ONLINE${NC}              ${G}│${NC}    ${G}│${NC}  ${G}● ONLINE${NC}              ${G}│${NC}"
-  echo -e "         ${G}└──────────────────────┘${NC}    ${G}└──────────────────────┘${NC}"
-fi
+
+    WN=$((ROW + 1))  # worker number start
+
+    # Top border
+    LINE=""
+    for ((c=0; c<COUNT; c++)); do
+      LINE+="  ${G}┌──────────────────────┐${NC}"
+    done
+    echo -e "$LINE"
+
+    # Worker label
+    LINE=""
+    for ((c=0; c<COUNT; c++)); do
+      NUM=$((WN + c))
+      printf -v seg "  ${G}│${NC}  ${W}${BOLD}🖥  WORKER %-2s${NC}        ${G}│${NC}" "$NUM"
+      LINE+="$seg"
+    done
+    echo -e "$LINE"
+
+    # Name
+    LINE=""
+    for ((c=0; c<COUNT; c++)); do
+      printf -v seg "  ${G}│${NC}  %-20s ${G}│${NC}" "${NAMES[$c]}"
+      LINE+="$seg"
+    done
+    echo -e "$LINE"
+
+    # IP
+    LINE=""
+    for ((c=0; c<COUNT; c++)); do
+      printf -v seg "  ${G}│${NC}  ${DIM}%-20s${NC} ${G}│${NC}" "${IPS[$c]}"
+      LINE+="$seg"
+    done
+    echo -e "$LINE"
+
+    # Status
+    LINE=""
+    for ((c=0; c<COUNT; c++)); do
+      LINE+="  ${G}│${NC}  ${STATS[$c]}              ${G}│${NC}"
+    done
+    echo -e "$LINE"
+
+    # Bottom border
+    LINE=""
+    for ((c=0; c<COUNT; c++)); do
+      LINE+="  ${G}└──────────────────────┘${NC}"
+    done
+    echo -e "$LINE"
+
+    ROW=$((ROW + COUNT))
+  done
 
 echo ""
 
