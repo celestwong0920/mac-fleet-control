@@ -84,6 +84,48 @@ for i, m in enumerate(d.get('machines', []), 1):
     print(f'  {i:<3} {name:<23} {user:<13} {ip:<17} {status}')
 " 2>/dev/null
   echo ""
+
+  # ── Visual topology ──
+  local master_name=$(hostname | sed 's/\.local$//')
+  local master_ip
+  master_ip=$(/Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 2>/dev/null || tailscale ip -4 2>/dev/null || echo "100.x.x.x")
+
+  echo -e "  ${CYAN}┌─────────────────────┐${NC}"
+  echo -e "  ${CYAN}│${NC} ${BOLD}🖥  MASTER${NC}           ${CYAN}│${NC}"
+  printf "  ${CYAN}│${NC} %-20s${CYAN}│${NC}\n" "$master_name"
+  printf "  ${CYAN}│${NC} ${DIM}%-20s${NC}${CYAN}│${NC}\n" "$master_ip"
+  echo -e "  ${CYAN}└──────────┬──────────┘${NC}"
+  echo -e "             ${CYAN}│${NC} ${DIM}Tailscale E2EE${NC}"
+
+  # Read machines and draw
+  python3 -c "
+import json
+with open('$FLEET_FILE') as f:
+    machines = json.load(f).get('machines', [])
+
+n = len(machines)
+if n == 0:
+    exit()
+
+C = '\033[0;36m'
+G = '\033[0;32m'
+W = '\033[1;37m'
+B = '\033[1m'
+D = '\033[2m'
+NC = '\033[0m'
+
+# Collect status results (reuse from earlier check via simple display)
+for i, m in enumerate(machines):
+    name = m.get('name', '?')[:18]
+    ip = m.get('ip', '?')
+    connector = '├' if i < n - 1 else '└'
+    print(f'             {C}{connector}── {G}🖥  {NC}{B}{name}{NC} {D}({ip}){NC}')
+
+print()
+" 2>/dev/null
+
+  echo -e "  ${DIM}github.com/celestwong0920/mac-fleet-control${NC}"
+  echo ""
 }
 
 # ── Get machine by number or name ──
