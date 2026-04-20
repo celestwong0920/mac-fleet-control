@@ -14,6 +14,48 @@
 
 ---
 
+## 🚀 极速上手（3 步搞定）
+
+> **唯一手动操作（每台机器只需一次，约 2 分钟）：** 在**所有** Mac（master + workers）上从 [App Store 装 Tailscale](https://apps.apple.com/app/tailscale/id1475387142) 并登录**同一个**账号。剩下的全部自动化。
+
+### 第 1 步 — 在你的第一台 Mac 上（这台就是 **master**）
+
+```bash
+git clone https://github.com/willau95/mac-fleet-control.git ~/mac-fleet-control \
+  && cd ~/mac-fleet-control \
+  && bash master-setup.sh
+```
+
+### 第 2 步 — 在 master 上拿到 worker 的安装命令
+
+```bash
+fleet-ssh master
+```
+
+会输出一条**完整可粘贴**的命令，例如：
+
+```bash
+git clone https://github.com/willau95/mac-fleet-control.git ~/mac-fleet-control \
+  && cd ~/mac-fleet-control \
+  && bash worker-setup.sh --master seacapital@100.107.142.39
+```
+
+### 第 3 步 — 在每一台你想控制的 Mac（worker）上
+
+把第 2 步的命令粘进 worker 的终端。脚本会自动：
+- ✅ 装 Homebrew（已装但 PATH 没配的话自动修复）
+- ✅ 装 Node.js + Playwright（chromium-headless-shell, ~70 MB）
+- ✅ 在后台异步触发 Xcode CLT 安装（节省 ~15 分钟）
+- ✅ 双向配置 SSH 免密 — 只问 master 密码**一次**
+- ✅ 自动注册到 master 的 fleet
+- ✅ 自检验证全部就绪
+
+**完事**。回 master 跑 `fleet-ssh list`，新 worker 已 online。
+
+> **可选第 4 步 — 让 worker 永远在线：** `bash worker-harden.sh`（禁睡眠、自动登录、自愈 watchdog）。详见下方 [Hardening](#步骤-3加固永远在线)。
+
+---
+
 ## 架构
 
 ```
@@ -44,84 +86,28 @@ Master C ──┘     任何网络都能连              └── Worker N
 
 ---
 
-## Master 设置（控制方）
+## 详细设置参考
 
-在需要**控制别人**的 Mac 上跑：
+### 多个 Master
 
-```bash
-git clone https://github.com/celestwong0920/mac-fleet-control.git ~/mac-fleet-control
-cd ~/mac-fleet-control
-bash master-setup.sh
-```
+一个 worker 可以同时注册到多个 master：
 
-完成后记住输出的信息，例如：
-```
-bash worker-setup.sh --master john@100.x.x.x
-```
-
-**就这样，Master 设置完成。**
-
----
-
-## Worker 设置（被控方）
-
-### 步骤 0：在 Master 上拿到完整命令（强烈推荐）
-
-> **忘了 `--master` 后面填什么？** 这是新 Worker 装机最常见的卡点。在任意一台 **Master** 上跑：
->
-> ```bash
-> fleet-ssh master
-> ```
->
-> 它会输出一条**完整的、可以直接粘贴**的命令，例如：
->
-> ```bash
-> git clone https://github.com/willau95/mac-fleet-control.git ~/mac-fleet-control \
->   && cd ~/mac-fleet-control \
->   && bash worker-setup.sh --master john@100.107.142.39
-> ```
->
-> 整段复制，粘到新 Worker 的终端，回车就行。**不用记 IP，不用记用户名。**
-
-### 步骤 1：跑脚本
-
-如果你想自己拼命令，在 Worker Mac 上跑：
-
-```bash
-git clone https://github.com/willau95/mac-fleet-control.git ~/mac-fleet-control
-cd ~/mac-fleet-control
-bash worker-setup.sh --master <master用户名>@<master的tailscale-ip>
-```
-
-`<master...>` 的值通过在 Master 上跑 `fleet-ssh master` 获得（见步骤 0）。
-
-例如：
-```bash
-bash worker-setup.sh --master john@100.x.x.x
-```
-
-多个 Master：
 ```bash
 bash worker-setup.sh --master john@100.x.x.x --master jane@100.y.y.y
 ```
 
-> **全新 Mac 第一次装？** 最耗时的步骤都是 macOS 系统层面的，不是我们能完全控制的：
-> - **Xcode Command Line Tools**（10-20 分钟）：脚本在 **Step 0 后台异步触发安装**，和其他步骤并行进行，等 brew 用到时大概率已装好。中途如果系统弹出对话框，点 **Install** 即可。
-> - **Homebrew + Node + Playwright**（3-5 分钟）：全部自动。Playwright 改用 `chromium-headless-shell`（~70 MB，是完整 Chromium 的一半），因为 fleet-tools 只做无头操作。
->
-> 如果 brew 之前已经装过但 `brew` 命令仍提示 `command not found`（macOS 新机的常见 bug），脚本会自动检测并修复 PATH，无需手动改 `.zprofile`。
+### worker-setup.sh 内部都做了什么
 
-**脚本会自动：**
-- ✅ 检查 Tailscale 连接
-- ✅ 开启 SSH
-- ✅ 安装 cliclick（鼠标/键盘）+ Playwright（浏览器）
-- ✅ 创建 fleet-tools 工具包
-- ✅ 双向配置 SSH 免密码
-- ✅ 自动注册到 Master 的 fleet
-- ✅ 验证 Master 能连回来
-- ✅ 结尾 Self-Test 检查所有工具
-
-**过程中会问一次 Master 密码，输入后永久免密。**
+| # | 步骤 | 说明 |
+|---|------|------|
+| 0 | 后台异步触发 Xcode CLT 安装 | 节省 ~10–20 分钟（不让 brew 串行触发） |
+| 1 | 验证 Tailscale 已连接 | 没连就退出并给提示 |
+| 2 | 开启 macOS Remote Login (SSH) | 通过 `systemsetup` |
+| 3 | 生成 SSH key + 配置 | 加 `IdentitiesOnly` 防 auth-flood 错误 |
+| 4 | 安装 Homebrew + 自动修复 PATH + cliclick + Node + Playwright | **自动修复"brew 装了但 PATH 没配"的常见坑** |
+| 5 | 创建 fleet-tools (`screenshot-url.js`, `browser-action.js`, `capture-screen.sh`) | 在 `~/fleet-tools/` |
+| 6 | 双向交换 SSH key + 注册到 master | Master 密码只问**一次** |
+| 7 | 输出还需要手动授权的 3 个权限（见下） | 一次性，重启不丢 |
 
 ### 步骤 2：手动设权限（一次性，1分钟）
 
@@ -300,6 +286,24 @@ sudo cp fleet-ssh /usr/local/bin/fleet-ssh
 ```
 
 `sudo cp` 这步是必须的 — `fleet-ssh` 安装在 `/usr/local/bin/`，单纯 git pull 不会更新它。
+
+> ⚠️ **常见坑：「我更新了，但 `fleet-ssh` 还是旧版的行为」**
+>
+> 有些机器在 PATH 里有**多份** `fleet-ssh`（`~/bin/`、`~/.local/bin/`、`/usr/local/bin/`）。Shell 调用的是 PATH 里**最先找到**的那份，可能正好遮住你刚更新的那份。检查方法：
+>
+> ```bash
+> type -a fleet-ssh
+> ```
+>
+> 如果看到多于一个路径，把其它的全部改成**软链**指向标准位置，以后更新自动同步：
+>
+> ```bash
+> rm ~/bin/fleet-ssh ~/.local/bin/fleet-ssh 2>/dev/null
+> ln -s /usr/local/bin/fleet-ssh ~/bin/fleet-ssh
+> ln -s /usr/local/bin/fleet-ssh ~/.local/bin/fleet-ssh
+> ```
+>
+> 之后你的更新流程就是一条命令：`cd ~/mac-fleet-control && git pull && sudo cp fleet-ssh /usr/local/bin/fleet-ssh` — 所有 PATH 入口同步看到新版。
 
 ### 速查表
 

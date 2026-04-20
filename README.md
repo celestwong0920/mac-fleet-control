@@ -14,6 +14,48 @@ Terminal commands · Browser automation · Mouse & keyboard · Screenshots · VN
 
 ---
 
+## 🚀 Quick Start (3 steps)
+
+> **Before you start (one-time, ~2 min):** Install [Tailscale from the App Store](https://apps.apple.com/app/tailscale/id1475387142) on **every** Mac (master + workers) and log into the **same** account. That's the only manual setup — the scripts handle everything else.
+
+### Step 1 — On your FIRST Mac (becomes the **master**)
+
+```bash
+git clone https://github.com/willau95/mac-fleet-control.git ~/mac-fleet-control \
+  && cd ~/mac-fleet-control \
+  && bash master-setup.sh
+```
+
+### Step 2 — On the master, print the worker install command
+
+```bash
+fleet-ssh master
+```
+
+You'll get a complete, paste-ready block like this:
+
+```bash
+git clone https://github.com/willau95/mac-fleet-control.git ~/mac-fleet-control \
+  && cd ~/mac-fleet-control \
+  && bash worker-setup.sh --master seacapital@100.107.142.39
+```
+
+### Step 3 — On EVERY Mac you want to control (workers)
+
+Paste the command from Step 2 into the worker's terminal. It will:
+- ✅ Auto-install Homebrew (and fix PATH if already installed)
+- ✅ Auto-install Node.js + Playwright (chromium-headless-shell, ~70 MB)
+- ✅ Trigger Xcode Command Line Tools install in the background (parallel, saves ~15 min)
+- ✅ Set up bidirectional SSH key auth — asks master password **once**
+- ✅ Auto-register to the master's fleet
+- ✅ Verify everything works
+
+**That's it.** Run `fleet-ssh list` on the master and your new worker is online.
+
+> **Optional 4th step — make workers always-on:** `bash worker-harden.sh` (disables sleep, enables auto-login, installs self-healing watchdog). See [Hardening](#step-3-hardening-always-online) below.
+
+---
+
 ## Architecture
 
 ```
@@ -44,84 +86,28 @@ Master C ──┘    Works on any network        └── Worker N
 
 ---
 
-## Master Setup (controller)
+## Detailed Setup Reference
 
-Run on any Mac that needs to **control other Macs**:
+### Multiple masters
 
-```bash
-git clone https://github.com/celestwong0920/mac-fleet-control.git ~/mac-fleet-control
-cd ~/mac-fleet-control
-bash master-setup.sh
-```
+You can register a worker to several masters at once:
 
-Note the output, e.g.:
-```
-bash worker-setup.sh --master john@100.x.x.x
-```
-
-**That's it. Master is ready.**
-
----
-
-## Worker Setup (controlled machine)
-
-### Step 0: Find the master command (on the master)
-
-> **Forgot what to type for `--master`?** This is the most common friction point. On any **master** Mac, run:
->
-> ```bash
-> fleet-ssh master
-> ```
->
-> It prints a complete, paste-ready command like:
->
-> ```bash
-> git clone https://github.com/willau95/mac-fleet-control.git ~/mac-fleet-control \
->   && cd ~/mac-fleet-control \
->   && bash worker-setup.sh --master john@100.107.142.39
-> ```
->
-> Copy the entire block, paste into the new worker's terminal, and you're done. No need to remember IPs or usernames.
-
-### Step 1: Run the script
-
-If you'd rather build the command yourself, on the worker Mac:
-
-```bash
-git clone https://github.com/willau95/mac-fleet-control.git ~/mac-fleet-control
-cd ~/mac-fleet-control
-bash worker-setup.sh --master <master-user>@<master-tailscale-ip>
-```
-
-Where the `<master-…>` values come from running `fleet-ssh master` on the master (see Step 0 above).
-
-Example:
-```bash
-bash worker-setup.sh --master john@100.x.x.x
-```
-
-Multiple masters:
 ```bash
 bash worker-setup.sh --master john@100.x.x.x --master jane@100.y.y.y
 ```
 
-> **First-time on a brand-new Mac?** The longest steps are out of our control:
-> - **Xcode Command Line Tools** (~10–20 min): The script kicks this off in the background at Step 0 so it overlaps with the rest of setup. You may still see a system dialog — click **Install** if it appears.
-> - **Homebrew + Node + Playwright** (~3–5 min): Auto-installed. Playwright uses `chromium-headless-shell` (~70 MB, half the size of full Chromium) since fleet-tools only does headless work.
->
-> If brew install was already done before running this script, the script auto-fixes the PATH (the common new-Mac trap where `brew` says "command not found" until you edit `.zprofile`).
+### What worker-setup.sh actually does
 
-**The script automatically:**
-- ✅ Checks Tailscale connection
-- ✅ Enables SSH
-- ✅ Installs cliclick (mouse/keyboard) + Playwright (browser)
-- ✅ Creates fleet-tools toolkit
-- ✅ Sets up bidirectional SSH key auth
-- ✅ Auto-registers to master's fleet
-- ✅ Verifies master can connect back
-- ✅ Runs self-test at the end
-
-**Will ask for master's password once — permanent passwordless access after that.**
+| # | Step | Notes |
+|---|------|-------|
+| 0 | Pre-trigger Xcode CLT install in background | Saves ~10–20 min vs. brew triggering it serially |
+| 1 | Verify Tailscale is connected | Aborts with instructions if not |
+| 2 | Enable macOS Remote Login (SSH) | Via `systemsetup` |
+| 3 | Generate SSH key + config | Sets `IdentitiesOnly` to avoid auth-flood errors |
+| 4 | Install Homebrew + auto-fix PATH + install cliclick + Node + Playwright | **Auto-fixes the common "brew installed but not in PATH" trap** |
+| 5 | Create fleet-tools (`screenshot-url.js`, `browser-action.js`, `capture-screen.sh`) | In `~/fleet-tools/` |
+| 6 | Bidirectional SSH key exchange + register to master(s) | Asks master password **once** |
+| 7 | Print the 3 manual permissions you still need to grant (see below) | One-time, survives reboots |
 
 ### Step 2: Manual permissions (one-time, 1 minute)
 
@@ -299,6 +285,24 @@ sudo cp fleet-ssh /usr/local/bin/fleet-ssh
 ```
 
 The `sudo cp` step is required because `fleet-ssh` is installed to `/usr/local/bin/` — `git pull` alone won't update it.
+
+> ⚠️ **Common trap: "I updated but `fleet-ssh` still acts like the old version."**
+>
+> Some setups have multiple `fleet-ssh` files in PATH (`~/bin/`, `~/.local/bin/`, `/usr/local/bin/`). The shell uses whichever appears first in PATH, which may shadow the one you just updated. Check with:
+>
+> ```bash
+> type -a fleet-ssh
+> ```
+>
+> If you see more than one path, make the others **symlinks** to the canonical copy so future updates flow through automatically:
+>
+> ```bash
+> rm ~/bin/fleet-ssh ~/.local/bin/fleet-ssh 2>/dev/null
+> ln -s /usr/local/bin/fleet-ssh ~/bin/fleet-ssh
+> ln -s /usr/local/bin/fleet-ssh ~/.local/bin/fleet-ssh
+> ```
+>
+> Then your update workflow becomes one command: `cd ~/mac-fleet-control && git pull && sudo cp fleet-ssh /usr/local/bin/fleet-ssh` — every PATH entry sees the new version.
 
 ### Quick reference
 
