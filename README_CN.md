@@ -14,9 +14,68 @@
 
 ---
 
-## 🚀 极速上手（3 步搞定）
+## 📋 前置条件（新电脑用户请先看这里）
 
-> **唯一手动操作（每台机器只需一次，约 2 分钟）：** 在**所有** Mac（master + workers）上从 [App Store 装 Tailscale](https://apps.apple.com/app/tailscale/id1475387142) 并登录**同一个**账号。剩下的全部自动化。
+跑本 repo 任何脚本之前，**每一台**你打算加入 fleet 的 Mac（无论 master 还是 worker）都必须先满足下面的条件。整个准备工作每台机器只需一次，约 5 分钟。完成之后，剩下的全部自动化。
+
+### 你需要什么
+
+| | 要求 |
+|---|------|
+| **硬件** | 任何 Mac（Intel 或 Apple Silicon），近 10 年的机器都行 |
+| **系统** | macOS 12 Monterey 或更新（更老的系统可能能跑但没测过） |
+| **磁盘** | ~5 GB 可用空间（主要是 Xcode CLT + Homebrew + Playwright） |
+| **网络** | 任何能上网的连接 — 4G 热点、NAT 后面、不同 WiFi 都行。Tailscale 自动处理 NAT 穿透。 |
+| **账号** | 一个免费的 Tailscale 账号（在 https://tailscale.com 注册，用 Google/Apple/Microsoft/GitHub 登录都行）。**Fleet 里所有 Mac 必须用同一个 Tailscale 账号。** |
+| **管理员密码** | 装机过程中会用到几次 macOS 登录密码（sudo、开 Remote Login、授权权限）。 |
+
+### A 步 — 打开 Terminal
+
+如果你从来没用过 Terminal：按 `⌘ + Space` → 输入 `Terminal` → 回车。
+
+会弹出一个黑/白色窗口 — 后面所有命令都在这里粘贴运行。窗口里**右键**就能粘贴，按回车执行。
+
+> **新 Mac 注意：** 第一次跑开发命令（比如 `git`）时，macOS 会弹一个对话框要你装 **Xcode Command Line Tools**。你可以现在就点 Install 装掉，也可以不管它 — 后面 `worker-setup.sh` 会在后台自动触发安装。
+
+### B 步 — 在每一台 Mac 上装 Tailscale
+
+Tailscale 是把所有 Mac 安全连接起来的网络层。**每一台机器都要装**（master + 每一台 worker）：
+
+1. 打开 App Store → 搜索 **Tailscale** → 安装
+   *（直接链接：https://apps.apple.com/app/tailscale/id1475387142）*
+
+2. 打开 Tailscale（它会出现在屏幕**右上角菜单栏**，是一个小图标）
+
+3. 点菜单栏的 Tailscale 图标 → **Log in** → 选你的登录方式（Google / Apple / Microsoft / GitHub / email）
+
+4. **关键：** 每台 Mac 必须登录到**同一个** Tailscale 账号，否则它们看不到对方。
+
+5. 验证已连接：菜单栏图标不应有斜杠。要双重确认，开 Terminal 跑：
+   ```bash
+   /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4
+   ```
+   你应该看到一个 `100.x.x.x` 开头的 IP（这是 Tailscale 分配的）。
+
+> **为什么用 App Store 而不是 Homebrew？** App Store 版作为标准 macOS 应用安装，开机自启、自动更新、原生权限对话框都自带。Homebrew 版需要额外手动配置。我们强烈推荐 App Store 版用于 fleet 上长期在线的机器。
+
+### C 步 — 登录 https://login.tailscale.com 检查（推荐）
+
+在几台 Mac 都登录 Tailscale 之后，访问 https://login.tailscale.com/admin/machines。你应该能看到这些机器列在那里。这里也是后续移除机器、分享给别人、查看状态的地方。**收藏这个页面**。
+
+### 你不需要手动装的东西
+
+下面这些脚本会全部自动处理 — 列在这里只是让你知道大致流程：
+
+- ❌ **Homebrew** — `worker-setup.sh` 自动装。如果已经装过但 `brew` 提示 `command not found`，脚本自动修复 PATH。
+- ❌ **Node.js / npm** — 通过 Homebrew 自动装。
+- ❌ **Playwright + 浏览器** — 自动装（用 `chromium-headless-shell`，~70 MB）。
+- ❌ **cliclick**（鼠标/键盘自动化）— 通过 Homebrew 自动装。
+- ❌ **Xcode Command Line Tools** — `worker-setup.sh` 在 Step 0 后台异步触发非交互式安装，和其他步骤并行进行，节省 ~10–20 分钟体感等待时间。如果系统弹出对话框，点 **Install** 即可。
+- ❌ **SSH 密钥** — 自动生成并交换。
+
+---
+
+## 🚀 极速上手（前置条件做完后，3 步搞定）
 
 ### 第 1 步 — 在你的第一台 Mac 上（这台就是 **master**）
 
@@ -70,19 +129,6 @@ Master C ──┘     任何网络都能连              └── Worker N
 - ✅ 不暴露公网端口
 - ✅ 换 WiFi / 换地点 / 4G 热点都能连
 - ✅ 自愈 Watchdog 每 5 分钟自动修复
-
----
-
-## 前置条件（手动，一次性）
-
-**每台机器只需 2 步手动操作：**
-
-1. **安装 Tailscale**（推荐 App Store 版，更稳定可靠）：
-   - https://apps.apple.com/app/tailscale/id1475387142
-
-2. **打开 Tailscale** → 登录同一个账号 → 确保显示已连接
-
-> Homebrew 和 Node.js 由 `worker-setup.sh` **自动安装并自动配置 PATH** — 无需手动操作。如果 Homebrew 已经装过但 `brew` 仍提示 `command not found`（macOS 新机的常见 bug），脚本会自动检测到并修复 PATH。
 
 ---
 

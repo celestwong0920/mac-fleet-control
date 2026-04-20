@@ -14,9 +14,68 @@ Terminal commands · Browser automation · Mouse & keyboard · Screenshots · VN
 
 ---
 
-## 🚀 Quick Start (3 steps)
+## 📋 Prerequisites (read this first if you have a brand-new Mac)
 
-> **Before you start (one-time, ~2 min):** Install [Tailscale from the App Store](https://apps.apple.com/app/tailscale/id1475387142) on **every** Mac (master + workers) and log into the **same** account. That's the only manual setup — the scripts handle everything else.
+Before running any of the scripts in this repo, the following must be true on **every** Mac you plan to use (both masters and workers). This whole section is a one-time, ~5 minute setup per machine. After this, everything else is automated.
+
+### What you need
+
+| | Requirement |
+|---|---|
+| **Hardware** | Any Mac (Intel or Apple Silicon) made in the last ~10 years |
+| **OS** | macOS 12 Monterey or newer (older versions may work but aren't tested) |
+| **Disk** | ~5 GB free (mostly for Xcode Command Line Tools + Homebrew + Playwright) |
+| **Network** | Any internet connection — even mobile hotspots, behind NAT, or different WiFi networks. Tailscale handles NAT traversal automatically. |
+| **Account** | A free Tailscale account (sign up at https://tailscale.com — uses your Google/Apple/Microsoft/GitHub login). All Macs in the fleet must share the **same** Tailscale account. |
+| **Admin password** | You'll need your macOS login password a few times during setup (for `sudo`, enabling Remote Login, granting permissions). |
+
+### Step A — Open Terminal
+
+If you've never used Terminal: press `⌘ + Space` → type `Terminal` → press Enter.
+
+A black/white window opens — this is where you'll paste commands. Right-click in the window to paste, then press Enter to run.
+
+> **Brand-new Mac note:** The very first time you run a developer command (like `git`), macOS will pop up a dialog asking to install **Xcode Command Line Tools**. You can click Install now to get it out of the way, but you don't have to — `worker-setup.sh` will trigger it for you in the background later.
+
+### Step B — Install Tailscale on every Mac
+
+Tailscale is the secure network layer that connects all your Macs. **Install on each machine** (master + every worker):
+
+1. Open the App Store → search **Tailscale** → Install
+   *(Direct link: https://apps.apple.com/app/tailscale/id1475387142)*
+
+2. Open Tailscale (it appears as a small icon in the menu bar, top-right of your screen)
+
+3. Click the menu bar icon → **Log in** → choose your login provider (Google / Apple / Microsoft / GitHub / email)
+
+4. **Critical:** every Mac must log in to the **same** Tailscale account, otherwise they can't see each other.
+
+5. Verify it's connected: the menu bar icon should not have a slash through it. To double-check, open Terminal and run:
+   ```bash
+   /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4
+   ```
+   You should see an IP starting with `100.x.x.x` (Tailscale assigns these).
+
+> **Why App Store and not Homebrew?** The App Store version installs as a proper macOS app with auto-launch on boot, automatic updates, and native permission dialogs. The Homebrew version requires extra manual setup. We strongly recommend the App Store version for fleet machines that should be always-on.
+
+### Step C — Sign in once at https://login.tailscale.com (recommended)
+
+Visit https://login.tailscale.com/admin/machines after you've logged in on a couple of Macs. You should see them listed there. This is where you can later remove machines, share with others, or check status. Bookmark it.
+
+### What you DON'T need to install manually
+
+The scripts handle all of this for you — listed here so you know what's coming:
+
+- ❌ **Homebrew** — auto-installed by `worker-setup.sh`. Already installed but `brew` says "command not found"? The script auto-fixes the PATH.
+- ❌ **Node.js / npm** — auto-installed via Homebrew.
+- ❌ **Playwright + browser** — auto-installed (uses `chromium-headless-shell`, ~70 MB).
+- ❌ **cliclick** (mouse/keyboard automation) — auto-installed via Homebrew.
+- ❌ **Xcode Command Line Tools** — `worker-setup.sh` triggers a non-interactive install in the background at Step 0, so it overlaps with everything else and saves ~10–20 minutes of perceived wait time. If a system dialog appears anyway, just click **Install**.
+- ❌ **SSH keys** — auto-generated and exchanged.
+
+---
+
+## 🚀 Quick Start (3 steps, after Prerequisites are done)
 
 ### Step 1 — On your FIRST Mac (becomes the **master**)
 
@@ -70,19 +129,6 @@ Master C ──┘    Works on any network        └── Worker N
 - ✅ No public ports exposed
 - ✅ Works across WiFi changes / locations / mobile hotspots
 - ✅ Self-healing watchdog (auto-fixes every 5 min)
-
----
-
-## Prerequisites (manual, one-time)
-
-**On every machine (only 2 manual steps):**
-
-1. **Install Tailscale** from the App Store (recommended for reliability):
-   - https://apps.apple.com/app/tailscale/id1475387142
-
-2. **Open Tailscale** → Log in with the same account → Ensure it shows connected
-
-> Homebrew and Node.js are installed (and added to PATH) automatically by `worker-setup.sh` — no manual setup needed. If Homebrew was already installed but `brew` says `command not found`, the script auto-fixes the PATH for you.
 
 ---
 
